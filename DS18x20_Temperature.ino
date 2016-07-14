@@ -15,7 +15,7 @@ unsigned long StartTime;
 unsigned long OnWindowSize[StageNum] = [10000, 8000, 6000, 4000, 2000];
 unsigned long Window;
 unsigned long StartTime;
-unsigned long Timer;
+unsigned long Timer = 3600000;
 bool OnFlag = false;
 bool HeatFlag = false;
 float celsius;
@@ -68,7 +68,7 @@ void setCommand(YunClient client) {
         if (value > 300 or value < 10){
             client.print(F("Error"));
         }else{
-            Timer = value;
+            Timer = value * 3600 * 1000;
             client.print(F("Set Timer to"));
             client.print(Timer);
         }
@@ -168,8 +168,8 @@ void heatloop(YunClient Client){
     Serial.println("Start by web command!");
     OnFlag = true;
     Stage = 0;
-    StartTime = millis();
     unsigned long Now = millis();
+    StartTime = Now;
     Window = Now;
     while((Now - StartTime) < Timer){
         GetTem();
