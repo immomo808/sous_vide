@@ -3,230 +3,223 @@
 #include <YunServer.h>
 #include <YunClient.h>
 
+#define StageNum 5
 
-OneWire  ds(3);  // on pin 10 (a 4.7K resistor is necessary)
-int PowerSwitch = 2;
-double targetTem = 60;
-double LowTem = 5;
-double HighTem = 2.5;
-int16_t raw;
-unsigned long OnWindowSize = 2000;
-unsigned long OffWindowSize = 2000;
+OneWire ds(3);          //DS18B20 sensor on digital 3
+int PowerSwitch = 2;    //Relay on digital 2
+
+int Stage = -1;
+double TargetTem = 60;
+double StageTem[StageNum] = [10, 8, 6, 4, 2]
+unsigned long StartTime;
+unsigned long OnWindowSize[StageNum] = [10000, 8000, 6000, 4000, 2000];
 unsigned long Window;
 unsigned long StartTime;
-bool CoolFlag = false;
-bool ChangeFlag = false;
-bool OnFlag;
-YunServer server;
-
+unsigned long Timer;
+bool OnFlag = false;
+bool HeatFlag = false;
+float celsius;
+YunServer Server;
 
 void setup(void) {
-  Serial.begin(9600);
-  pinMode(PowerSwitch,OUTPUT);
-  Bridge.begin();Bridge.begin();
-  server.listenOnLocalhost();
-  server.begin();
-  StartTime = millis();
+    Serial.begin(9600);
+    pinMode(PowerSwitch,OUTPUT);
+    Bridge.begin();
+    Server.listenOnLocalhost();
+    Server.begin();
 }
 
-void getCommand(YunClient client) {
-  //Serial.println(client.readString());
-  String com = client.readStringUntil('/');
-  //Serial.println(com == "tem");
-  if ( com == "tem"){
-    //client.print(F("Temperature"));
-    client.print((float)raw/16.0);
-  }else if(com == "time"){
-    client.print((millis() -StartTime)/(double)1000);
-  }
+void getCommand(YunClient Client) {
+    Client.println("Status: 200");
+    Client.println("Content-type: application/json");
+    Client.print("{");
+    Client.print("\"tem\":");
+    Client.print("\"" + celsius + "\",");
+    Client.print("\"target\":");
+    Client.print("\"" + TargetTem + "\",");
+    Client.print("\"timer\":");
+    Client.print("\"" + Timer + "\",");
+    Client.print("\"status\":");
+    Client.print("\"" + OnFlag + "\",");
+    if (OnFlag){
+        Client.print("\"start\":");
+        Client.print("\"" + StartTime + "\",");
+        Client.print("\"duration\":");
+        Client.print("\"" + millis() - Startime + "\",");
+        Client.print("\"stage\":");
+        Client.print("\"" + Stage + "\",");
+    }
+    Client.print("}");
 }
 void setCommand(YunClient client) {
-  String com = client.readStringUntil('/');
-  if ( com == "tem"){
-    //client.print(F("Temperature"));
-    int value = client.parseInt();
-    if (value > 70 or value <40){
-      client.print(F("Error"));
-    }else{
-      targetTem = value;
-      client.print(F("Set Temperature to"));
-      client.print(targetTem);
+    String com = client.readStringUntil('/');
+    if ( com == "tem"){
+        int value = client.parseInt();
+        if (value > 70 or value <40){
+            client.print(F("Error"));
+        }else{
+            TargerTem = value;
+            client.print(F("Set Temperature to"));
+            client.print(TargetTem);
+        }
+        return
+    }else if ( com == "timer" ){
+        int value = client.parseInt();
+        if (value > 300 or value < 10){
+            client.print(F("Error"));
+        }else{
+            Timer = value;
+            client.print(F("Set Timer to"));
+            client.print(Timer);
+        }
+        return
     }
-  }
 }
 
-void process(YunClient client) {
-  // read the command
-  String command = client.readStringUntil('/');
+int process(YunClient client) {
+    String command = client.readStringUntil('/');
 
-  if (command == "get") {
-    getCommand(client);
-  }
+    if (command == "get") {
+        getCommand(client);
+        Serial.println("Get by web command!");
+        return 0;
+    }
 
-  if (command == "set") {
-    setCommand(client);
-  }
+    if (command == "set") {
+        if (!OnFlag){
+            setCommand(client);
+            Serial.println("Set by web command!");
+        }else{
+            client.print(F("Is heating now, can't chhange the setting."));
+            Serial.println("Set by web command, Error!");
+        }
+        return 0;
+    }
 
-  if (command == "start") {
-    //startCommand(client);
-  }
-  if (command == "stop") {
-    //stopCommand(client);
-  }
+    if (command == "start") {
+        if (!OnFlag){
+            if ( celsius > (TargetTem - StageTem[0])){
+                client.print(F("The temperature is too high, can't start heating."));
+                Serial.println("Start by web command, Error!");
+            }
+        }else{
+            heatloop(client);
+        }
+    }else{
+        client.print(F("Is already heating now."));
+    }
+
+    if (command == "stop") {
+        if (OnFlag){
+            return 1;
+        }else{
+            client.print(F("Is not heating now."));
+            Serial.println("Stop by web command, Error!");
+        }
+    }
+    return 0;
+}
+
+void GetTem(){
+    int16_t raw;
+    byte i;
+    byte present = 0;
+    byte type_s = 1;
+    byte data[12];
+    byte addr[8];
+    if ( !ds.search(addr)) {
+        Serial.println("No more addresses.");
+        Serial.println();
+        ds.reset_search();
+        delay(250);
+        return;
+    }
+    ds.reset();
+    ds.select(addr);
+    ds.write(0x44, 1); 
+
+    delay(1000);
+
+    present = ds.reset();
+    ds.select(addr);    
+    ds.write(0xBE);         // Read Scratchpad
+
+    for ( i = 0; i < 9; i++) {           // we need 9 bytes
+        data[i] = ds.read();
+    }
+    raw = (data[1] << 8) | data[0];
+    raw = raw << 3; // 9 bit resolution default
+    if (data[7] == 0x10) {
+        raw = (raw & 0xFFF0) + 12 - data[6];
+    }
+    celsius = (float)raw / 16.0;
+    Serial.print("  Temperature = ");
+    Serial.println(celsius);
+}
+void Fire(bool h){
+    digitalWrite(PowerSwitch, h ? HIGH : LOW);
+    HeatFlag = h;
+    Serial.print(" Switch HeatFlag to");
+    Serial.println(h);
+}
+
+void heatloop(YunClient Client){
+    Client.stop();
+    Serial.println("Start by web command!");
+    OnFlag = true;
+    Stage = 0;
+    StartTime = millis();
+    unsigned long Now = millis();
+    Window = Now;
+    while((Now - StartTime) < Timer){
+        GetTem();
+        Client = Server.accept();
+        if (Client) {
+            if (process(Client)){
+                Fire(false);
+                Onflag = false;
+                Stage = -1;
+                Serial.println("Stop by web command!");
+                return;
+            }
+            Client.stop();
+        }
+        if (celsius > (TargetTem - StageTem[Stage])){
+            Stage += 1;
+            Serial.print(" Change to Stage:");
+            Serial.println(Stage);
+        }
+        if (Stage > 0 && celsius < (TargetTem - StageTem[Stage - 1])){
+            Stage -= 1;
+            Serial.print(" Change to Stage:");
+            Serial.println(Stage);
+        }
+        if (Stage != StageNum){
+            if (Now > Window) {
+                Fire(!HeatFlag);
+                Window = Window + ((HeatFlag) ? OnWindowSize[0] : 10000 - OnWindowSize[0]);
+                Serial.print("New Window");
+                Serial.println(Window);
+            }
+        }else{
+            Fire(false);
+            Window = Now;
+            Serial.println("Reach the target, Cooling");
+        }
+        Now = millis();
+    }
+    Fire(false);
+    Onflag = false;
+    Stage = -1;
+    Serial.println("Reach the time, Stop!");
+    return;
 }
 
 void loop(void) {
-  YunClient client = server.accept();
-  if (client) {
-    // Process request
-    process(client);
-
-    // Close connection and free resources.
-    client.stop();
-  }
-  byte i;
-  byte present = 0;
-  byte type_s;
-  byte data[12];
-  byte addr[8];
-  float celsius, fahrenheit;
-  
-  if ( !ds.search(addr)) {
-    //Serial.println("No more addresses.");
-    //Serial.println();
-    ds.reset_search();
-    delay(250);
-    return;
-  }
-  /*
-  Serial.print("ROM =");
-  for( i = 0; i < 8; i++) {
-    Serial.write(' ');
-    Serial.print(addr[i], HEX);
-  }
-*/
-  if (OneWire::crc8(addr, 7) != addr[7]) {
-      Serial.println("CRC is not valid!");
-      return;
-  }
-  Serial.println();
- 
-  // the first ROM byte indicates which chip
-  switch (addr[0]) {
-    case 0x10:
-      Serial.println("  Chip = DS18S20");  // or old DS1820
-      type_s = 1;
-      break;
-    case 0x28:
-      //Serial.println("  Chip = DS18B20");
-      type_s = 0;
-      break;
-    case 0x22:
-      Serial.println("  Chip = DS1822");
-      type_s = 0;
-      break;
-    default:
-      Serial.println("Device is not a DS18x20 family device.");
-      return;
-  } 
-
-  ds.reset();
-  ds.select(addr);
-  ds.write(0x44, 1);        // start conversion, with parasite power on at the end
-  
-  delay(1000);     // maybe 750ms is enough, maybe not
-  // we might do a ds.depower() here, but the reset will take care of it.
-  
-  present = ds.reset();
-  ds.select(addr);    
-  ds.write(0xBE);         // Read Scratchpad
-
-  //Serial.print("  Data = ");
-  //Serial.print(present, HEX);
-  //Serial.print(" ");
-  for ( i = 0; i < 9; i++) {           // we need 9 bytes
-    data[i] = ds.read();
-    //Serial.print(data[i], HEX);
-    //Serial.print(" ");
-  }
-  //Serial.print(" CRC=");
-  //Serial.print(OneWire::crc8(data, 8), HEX);
-  //Serial.println();
-
-  // Convert the data to actual temperature
-  // because the result is a 16 bit signed integer, it should
-  // be stored to an "int16_t" type, which is always 16 bits
-  // even when compiled on a 32 bit processor.
-  raw = (data[1] << 8) | data[0];
-  if (type_s) {
-    raw = raw << 3; // 9 bit resolution default
-    if (data[7] == 0x10) {
-      // "count remain" gives full 12 bit resolution
-      raw = (raw & 0xFFF0) + 12 - data[6];
+    GetTem();
+    YunClient Client = Server.accept();
+    if (Client) {
+        process(Client);
+        Client.stop();
     }
-  } else {
-    byte cfg = (data[4] & 0x60);
-    // at lower res, the low bits are undefined, so let's zero them
-    if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
-    else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
-    else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
-    //// default is 12 bit resolution, 750 ms conversion time
-  }
-  celsius = (float)raw / 16.0;
-  //fahrenheit = celsius * 1.8 + 32.0;
-  Serial.print("  Temperature = ");
-  Serial.print(celsius);
-  Serial.print(" Celsius, ");
-  
-  if (celsius < targetTem - LowTem){
-    digitalWrite(PowerSwitch,HIGH);
-    Serial.print("on");
-    ChangeFlag = false;
-    OnFlag = true;
-    CoolFlag = false;
-  }
-  if (celsius > targetTem - LowTem && !ChangeFlag){
-    digitalWrite(PowerSwitch,LOW);
-    Serial.print("off");
-    ChangeFlag = true;
-    OnFlag = false;
-  }
-  if (celsius > targetTem){
-    digitalWrite(PowerSwitch,LOW);
-    Serial.print("off");
-    ChangeFlag = false;
-    OnFlag = false;
-    CoolFlag = true;
-  }
-   if (celsius < (targetTem - HighTem) && CoolFlag){
-    digitalWrite(PowerSwitch,HIGH);
-    Serial.print("on");
-    ChangeFlag = true;
-    OnFlag = true;
-    CoolFlag = false;
-  } 
-  if (celsius > targetTem){
-    digitalWrite(PowerSwitch,LOW);
-    Serial.print("off");
-    ChangeFlag = false;
-    OnFlag = false;
-    CoolFlag = true;
-  }
-  if (ChangeFlag && !CoolFlag){
-    unsigned long now = millis();
-    if (now > Window){
-      if (OnFlag){
-        digitalWrite(PowerSwitch,LOW);
-        Window = now + OffWindowSize;
-        Serial.print("off");
-        OnFlag = false;
-      }else{
-        digitalWrite(PowerSwitch,HIGH);
-        Window = now + OnWindowSize;
-        Serial.print("on");
-        OnFlag = true;
-      }
-    }
-  }
-
 }
