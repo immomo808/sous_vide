@@ -13,40 +13,53 @@
 <div id="start"></div>
 <div id="duration"></div>
 <div id="stage"></div>
-<div id="startlink"><a href="IP/start/junk">Start</a></div>
-<div id="stoplink"><a href="IP/stop/junk">Stop</a></div>
+<div id="startlink"><a href="http://192.168.240.1/arduino/start/junk">Start</a></div>
+<div id="stoplink"><a href="http://192.168.240.1/arduino/stop/junk">Stop</a></div>
 </div>
-<script   src="https://code.jquery.com/jquery-2.2.4.min.js"   integrity="sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44="   crossorigin="anonymous"></script>
-<script src='http://cdnjs.cloudflare.com/ajax/libs/d3/3.4.11/d3.min.js'></script>
+<script src="jquery-3.0.0.min.js"></script>
+<script src="d3.v4.min.js"></script>
 <script>  
 var currentTemp = 30;
-$.ajax({url: "testjson.html",
-  //dataType: "json",
-  async: false,
-  success: function(result){
-   result = {"tem" : "36.6", "target" : "60", "timer" : "3600000", "status" : "true", "start" : "0000000", "duration" : "1000000", "stage" : "2", };
-    currentTemp = parseFloat(result['tem']);
+setInterval(function() 
+{
+    
+  $.ajax({url: "http://192.168.240.1/arduino/get/hyh",
+    dataType: "json",
+    async: false,
+    success: function(result){
+      console.log('success', result);
+      //result = {"tem" : "36.6", "target" : "60", "timer" : "3600000", "status" : "true", "start" : "0000000", "duration" : "1000000", "stage" : "2", };
+      currentTemp = parseFloat(result['tem']);
+      //currentTemp += Math.floor((Math.random() * 10) + 1);
+      console.log(currentTemp);
+      $("#current").html( "現在溫度：" + currentTemp);
+      $("#target").html("目標溫度：" + parseFloat(result['target']));
+      var timer = parseFloat(result['timer'])/1000;
+      hr = ~~(timer / 3600);
+      mm = ~~((timer % 3600)/60);
+      ss = ~~(timer % 60);
+      $("#timer").html("定時：" + hr + "H " + mm + ":" + ss);
+      if (result['status'] == "1"){
+        $("#status").html( "開啟中");
+        var duration = parseFloat(result['duration'])/1000;
+        hr = ~~(duration / 3600);
+        mm = ~~((duration % 3600)/60);
+        ss = ~~(duration % 60);
+        $("#duration").html("已執行時間：" + hr + "H " + mm + ":" + ss);
+        $("#stage").html("階段：" + parseInt(result['stage']));
+      }else{
+        $("#status").html("關閉中");
+      }
+        $("#thermo svg").remove();
+        draw();
+  }});
+
+}, 1000);
+
+
     console.log(currentTemp);
-    $("#current").html( "現在溫度：" + currentTemp);
-    $("#target").html("目標溫度：" + parseFloat(result['target']));
-    var timer = parseFloat(result['timer'])/1000;
-    hr = ~~(timer / 3600);
-    mm = ~~((timer % 3600)/60);
-    ss = ~~(timer % 60);
-    $("#timer").html("定時：" + hr + "H " + mm + ":" + ss);
-    if (result['status'] == "true"){
-      $("#status").html( "開啟中");
-      var duration = parseFloat(result['duration'])/1000;
-      hr = ~~(duration / 3600);
-      mm = ~~((duration % 3600)/60);
-      ss = ~~(duration % 60);
-      $("#duration").html("已執行時間：" + hr + "H " + mm + ":" + ss);
-      $("#stage").html("階段：" + parseInt(result['stage']));
-    }else{
-      $("#status").html("關閉中");
-    }
-}});
-    console.log(currentTemp);
+var draw = function(){
+
 //var width = 80, height = 300, maxTemp = 70, minTemp = 20, currentTemp = 30;
 var width = 80, height = 300, maxTemp = 70, minTemp = 20;
 var bottomY = height - 5, topY = 5, bulbRadius = 20, tubeWidth = 21.5, tubeBorderWidth = 1, mercuryColor = 'rgb(230,0,0)', innerBulbColor = 'rgb(230, 200, 200)';
@@ -95,5 +108,8 @@ svgAxis.selectAll('.tick text').style('fill', '#777777').style('font-size', '10p
 svgAxis.select('path').style('stroke', 'none').style('fill', 'none');
 svgAxis.selectAll('.tick line').style('stroke', tubeBorderColor).style('shape-rendering', 'crispEdges').style('stroke-width', '1px');
 //# sourceURL=pen.js
+
+};
+
 </script>
 </body></html>
